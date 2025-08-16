@@ -3,6 +3,7 @@ from fastapi.responses import JSONResponse
 
 from .utils.io_loader import classify_and_read
 from .utils.timer import with_time_budget
+from .utils.formats import parse_questions
 
 
 app = FastAPI(title="Data Analyst Agent API")
@@ -44,13 +45,13 @@ async def handle_api(
         if getattr(q_file, "content_type", None) not in ("text/plain", "application/octet-stream", None):
             raise HTTPException(status_code=400, detail="questions.txt must be a text file")
 
-        # Touch-read questions to ensure accessible
+        # Touch-read questions to ensure accessible and capture text for format parsing
         try:
-            await q_file.read()
+            q_bytes = await q_file.read()
         except Exception:
             raise HTTPException(status_code=400, detail="Failed to read questions.txt")
 
-        # Process all other files
+    # Process all other files
         for key, value in form.multi_items():
             if key == "questions.txt":
                 continue
@@ -71,16 +72,37 @@ async def handle_api(
                 else:
                     inputs["raw"].append(fname or "raw")
 
-        # Return with timing info (Step 3)
+        # STEP 4: Detect requested output format from questions.txt and shape a dummy result
+        q_text = ""
+        try:
+            q_text = q_bytes.decode("utf-8", errors="ignore") if isinstance(q_bytes, (bytes, bytearray)) else str(q_bytes)
+        except Exception:
+            q_text = ""
+
+        plan = parse_questions(q_text)
+
+        shaped: dict
+        if plan.get("type") == "array":
+            count = plan.get("array_count") or 0
+            shaped = {"result": ["" for _ in range(count)]}
+        elif plan.get("type") == "object":
+            keys = plan.get("object_keys") or []
+            shaped = {"result": {k: "N/A" for k in keys}}
+        else:
+            shaped = {"result": {"notes": "unknown format; returning placeholder"}}
+
+        # Return with timing info (Step 3) and format plan (Step 4)
         return JSONResponse(
             {
                 "status": "ok",
-                "note": "step-3",
+                "note": "step-4",
                 "counts": {
                     "dataframes": len(inputs["dataframes"]),
                     "images": len(inputs["images"]),
                     "raw": len(inputs["raw"]),
                 },
+                "plan": plan,
+                **shaped,
                 "timing": {
                     "elapsed_sec": round(budget.elapsed_seconds(), 3),
                     "remaining_sec": round(budget.remaining_seconds(), 3),

@@ -1,0 +1,4 @@
+id,name,score,passed
+1,Alice,85.5,True
+2,Bob,92.3,True
+3,Charlie,78.9,False

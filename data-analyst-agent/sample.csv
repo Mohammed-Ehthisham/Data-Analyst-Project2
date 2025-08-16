@@ -1,0 +1,6 @@
+id,name,age,department,salary,full_time
+1,Alice,29,Engineering,85000,True
+2,Bob,35,Marketing,65000,True
+3,Charlie,28,Sales,55000,False
+4,Diana,42,Engineering,98000,True
+5,Evan,31,HR,60000,False

@@ -1,3 +1,51 @@
+# Python caches
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+.Python
+.pytest_cache/
+.mypy_cache/
+.cache/
+pip-wheel-metadata/
+
+# Build/dist
+dist/
+build/
+
+# Virtual envs
+.venv/
+venv/
+env/
+ENV/
+
+# IDE/editor
+.idea/
+.vscode/
+*.code-workspace
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Secrets/config
+.env
+*.env
+.env.*.local
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Logs/temp
+*.log
+*.tmp
+
+# Binaries not needed in deploy
+*.bin
+
+# App bytecode caches
+
 .venv/
 __pycache__/
 *.pyc
@@ -17,7 +65,5 @@ __pycache__/
 *.tiff
 *.webp
 *.txt
-data-analyst-agent/*.csv
-data-analyst-agent/*.json
-data-analyst-agent/*.parquet
-data-analyst-agent/tasks
+
+start.py

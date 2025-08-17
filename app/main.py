@@ -10,6 +10,8 @@ from .tasks.network import run_network
 from .tasks.weather import run_weather
 from .tasks.wikipedia import run_wikipedia
 from .tasks.duckdb_tasks import run_duckdb_example
+from .utils.llm_client import ask_openai_json
+from .tasks.highcourt import run_highcourt
 
 
 app = FastAPI(title="Data Analyst Agent API")
@@ -24,7 +26,6 @@ def read_root():
 @app.post("/")
 async def handle_api(
     request: Request,
-    questions_file: UploadFile | None = File(default=None, alias="questions.txt", description="Questions text file (required)"),
     files: list[UploadFile] | None = File(default=None, description="All form files (fallback)")
 ):
     # Time budget for the entire request (Step 3)
@@ -35,18 +36,26 @@ async def handle_api(
         except Exception:
             raise HTTPException(status_code=400, detail="Invalid multipart/form-data")
 
-        # Locate questions file with robust fallbacks
-        q_file = questions_file
+        # Locate questions with robust fallbacks (file or inline text field)
+        q_file: UploadFile | None = None
+        q_bytes: bytes | None = None
         if q_file is None:
             for key, value in form.multi_items():
-                if key == "questions.txt" and hasattr(value, "filename") and hasattr(value, "read"):
-                    q_file = value  # type: ignore[assignment]
-                    break
+                if key == "questions.txt":
+                    if hasattr(value, "filename") and hasattr(value, "read"):
+                        q_file = value  # type: ignore[assignment]
+                        break
+                    # Inline text field case
+                    if isinstance(value, str) and not q_bytes:
+                        q_bytes = value.encode("utf-8", errors="ignore")
         if q_file is None:
             for key, value in form.multi_items():
-                if key == "question.txt" and hasattr(value, "filename") and hasattr(value, "read"):
-                    q_file = value  # type: ignore[assignment]
-                    break
+                if key == "question.txt":
+                    if hasattr(value, "filename") and hasattr(value, "read"):
+                        q_file = value  # type: ignore[assignment]
+                        break
+                    if isinstance(value, str) and not q_bytes:
+                        q_bytes = value.encode("utf-8", errors="ignore")
         if q_file is None and files:
             for f in files:
                 if (f.filename or "").lower() == "questions.txt":
@@ -69,18 +78,20 @@ async def handle_api(
                     q_file = f
                     break
 
-        if q_file is None or not getattr(q_file, "filename", None):
+        if q_file is None and q_bytes is None:
             raise HTTPException(status_code=400, detail="questions.txt is required")
 
         # Validate content type (allow octet-stream or missing)
-        if getattr(q_file, "content_type", None) not in ("text/plain", "application/octet-stream", None):
-            raise HTTPException(status_code=400, detail="questions.txt must be a text file")
+        if q_file is not None:
+            if getattr(q_file, "content_type", None) not in ("text/plain", "application/octet-stream", None):
+                raise HTTPException(status_code=400, detail="questions.txt must be a text file")
 
         # Read questions bytes
-        try:
-            q_bytes = await q_file.read()
-        except Exception:
-            raise HTTPException(status_code=400, detail="Failed to read questions.txt")
+        if q_bytes is None and q_file is not None:
+            try:
+                q_bytes = await q_file.read()
+            except Exception:
+                raise HTTPException(status_code=400, detail="Failed to read questions.txt")
 
         # Collect other files (and load DataFrames for tasks)
         inputs = {"dataframes": [], "images": [], "raw": []}
@@ -128,19 +139,25 @@ async def handle_api(
 
         # Parse questions to build plan (still basic from Step 4)
         try:
-            q_text = q_bytes.decode("utf-8", errors="ignore") if isinstance(q_bytes, (bytes, bytearray)) else str(q_bytes)
+            q_text = q_bytes.decode("utf-8", errors="ignore") if isinstance(q_bytes, (bytes, bytearray)) else str(q_bytes or "")
         except Exception:
             q_text = ""
         simple_plan = parse_questions(q_text)
         combined_plan = parse_plan(q_text)
         plan = simple_plan
 
-        # Minimal task routing retained from Step 6 (no change for PATCH A)
+    # Minimal task routing retained from Step 6, with LLM consult for vague/no-plugin cases
         dfs = dfs_loaded
         result_payload = {"notes": "no-op"}
         try:
             text_low = q_text.lower()
-            if "wikipedia" in text_low or "wiki" in text_low or "http://" in text_low or "https://" in text_low:
+            # High court must be checked before generic URL/wiki handling
+            if "high court" in text_low or "high-court" in text_low or "judgments.ecourts.gov.in" in text_low:
+                if budget.time_exhausted(3.0):
+                    result_payload = {"notes": "timeout-skip-highcourt"}
+                else:
+                    result_payload = run_highcourt(q_text)
+            elif ("wikipedia" in text_low) or ("wikipedia.org" in text_low):
                 if budget.time_exhausted(2.0):
                     result_payload = {"notes": "timeout-skip-wiki"}
                 else:
@@ -166,9 +183,35 @@ async def handle_api(
                 else:
                     result_payload = run_duckdb_example(q_text)
             else:
+                # If vague or no plugin matched, optionally ask LLM for hints to improve plan
+                matched = False
                 if budget.time_exhausted(2.0):
                     result_payload = {"notes": "timeout-skip-generic"}
                 else:
+                    # quick heuristic: few keywords and short request => vague
+                    vague = len(q_text.split()) < 12 and not any(k in text_low for k in ["sales","latency","temperature","wiki","duckdb"]) 
+                    if vague and not budget.time_exhausted(1.0):
+                        try:
+                            plan_hint = ask_openai_json(
+                                f"""
+Analyze this request and propose a JSON plan:
+- type: "array" or "object"
+- object_keys: [] if object
+- plot: true/false and chart type (bar/line/scatter)
+- color: name if specified
+---
+QUESTION:
+{q_text}
+                                """
+                            )
+                            if isinstance(plan_hint, dict) and plan_hint.get("object_keys") and isinstance(combined_plan.get("object_keys"), list):
+                                # Merge keys suggestion (append unique)
+                                ok = set(combined_plan.get("object_keys") or [])
+                                for k in plan_hint.get("object_keys", []):
+                                    if isinstance(k, str) and k not in ok:
+                                        combined_plan["object_keys"].append(k)
+                        except Exception:
+                            pass
                     result_payload = run_generic(q_text, {"dfs": dfs})
         except Exception as e:
             result_payload = {"notes": f"task-error: {e}"}
@@ -178,7 +221,13 @@ async def handle_api(
         shaped = {}
         if cplan.get("response_type") == "array":
             n = cplan.get("array_len") or 0
-            shaped = {"result": ["" for _ in range(n)], "task": result_payload}
+            # If highcourt task produced answers and plot, map them into array order if possible
+            arr = ["" for _ in range(n)]
+            if isinstance(result_payload, dict):
+                # Best-effort fill: count of >$2bn before 2000 unknown -> "0"; earliest >1.5bn unknown -> "N/A"
+                # For highcourt prompt we don't use array path; this is a placeholder
+                pass
+            shaped = {"result": arr, "task": result_payload}
         else:
             keys = cplan.get("object_keys") or []
             shaped_obj = {}
@@ -206,6 +255,35 @@ async def handle_api(
                         val = result_payload["line_chart"]
                     if k == chart_key_map.get("bar") and "bar_chart" in result_payload:
                         val = result_payload["bar_chart"]
+
+                # Highcourt special mapping for textual keys
+                if val is None and isinstance(result_payload, dict):
+                    kl = k.lower()
+                    if ("high court" in kl and ("disposed" in kl or "most cases" in kl)) and "top_court_2019_2022" in result_payload:
+                        val = result_payload.get("top_court_2019_2022", "N/A")
+                    elif "slope" in kl and "33_10" in kl:
+                        val = result_payload.get("slope_33_10", 0.0)
+                    elif ("corr" in kl or "correlation" in kl) and "33_10" in kl:
+                        val = result_payload.get("corr_33_10", 0.0)
+
+                # Highcourt scatter plot mapping
+                if (val is None or val == "") and isinstance(result_payload, dict) and "points_33_10" in result_payload and ("plot" in k.lower() or "scatter" in k.lower()):
+                    # Render scatter from points with encoder and assign
+                    try:
+                        from .utils.plotter import plot_scatter_with_regression, encode_fig
+                        pts = result_payload["points_33_10"]
+                        xs = [p[0] for p in pts][:500]
+                        ys = [p[1] for p in pts][:500]
+                        fig = plot_scatter_with_regression(xs, ys, "year", "days", dotted_red=True)
+                        mode = "raw_base64" if cplan.get("raw_base64_images") else "data_uri"
+                        val = encode_fig(fig, mime="image/png", max_bytes=100_000, mode=mode)
+                        try:
+                            import matplotlib.pyplot as plt
+                            plt.close(fig)
+                        except Exception:
+                            pass
+                    except Exception:
+                        val = ""
 
                 # enforce numeric for typical numeric fields
                 if k.lower() in ("total_sales", "avg_latency_ms", "avg_temperature") and not isinstance(val, (int, float)):

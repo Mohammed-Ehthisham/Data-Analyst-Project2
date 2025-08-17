@@ -19,7 +19,7 @@ SIZE_RE = re.compile(r"(\d{2,3}[,]?\d{3})\s*bytes|([1-9]\d*)\s*k(?:b|ib)?", re.I
 BAR_RE = re.compile(r"\b(bar|bars|bar\s*chart)\b", re.IGNORECASE)
 LINE_RE = re.compile(r"\bline\s*(chart|plot)\b", re.IGNORECASE)
 HIST_RE = re.compile(r"\b(hist|histogram)\b", re.IGNORECASE)
-SCATTER_RE = re.compile(r"\bscatter\b", re.IGNORECASE)
+SCATTER_RE = re.compile(r"\bscatter(?:\s*plot)?\b|\bscatterplot\b", re.IGNORECASE)
 COLOR_RE = re.compile(r"\b(blue|green|red|orange|purple|black)\b", re.IGNORECASE)
 DATA_URI_RE = re.compile(r"data\s*uri|data:image/\w+;base64", re.IGNORECASE)
 RAW_B64_RE = re.compile(r"raw\s*base64|base64\s*(png|only)\b", re.IGNORECASE)
@@ -144,10 +144,64 @@ def parse_plan(text: str) -> Dict[str, object]:
     shape = parse_required_shape(text)
     charts = detect_chart_specs(text)
     raw = wants_raw_base64(text)
+    response_type = shape.get("type", "object")
+    obj_keys = shape.get("object_keys") or []
+    # Try to extract keys from JSON code blocks if none found
+    if response_type == "object" and not obj_keys:
+        blocks = re.finditer(r"```json\s*\{([\s\S]*?)\}\s*```", text, re.IGNORECASE)
+        best_keys: List[str] = []
+        best_score = -999
+        import json as _json
+        for m in blocks:
+            try:
+                block = "{" + m.group(1) + "}"
+                parsed = _json.loads(block)
+                if not isinstance(parsed, dict):
+                    continue
+                keys_list = list(parsed.keys())
+                # Score this block: prefer answer schema (keys with spaces/question marks)
+                score = 0
+                if any((" " in k) or ("?" in k) for k in keys_list):
+                    score += 5
+                # Penalize field-like keys only (snake/camel without spaces)
+                if all(re.fullmatch(r"[A-Za-z0-9_]+", k) for k in keys_list):
+                    score -= 2
+                # Prefer blocks whose values look like placeholders/URIs for images
+                vals = list(parsed.values())
+                if any(isinstance(v, str) and (v.strip() in ("...", "") or v.strip().startswith("data:image")) for v in vals):
+                    score += 3
+                # Prefer modest-sized schemas
+                if 2 <= len(keys_list) <= 12:
+                    score += 1
+                if score > best_score:
+                    best_score = score
+                    best_keys = keys_list
+            except Exception:
+                continue
+        if best_keys:
+            obj_keys = best_keys
+    # If no explicit keys provided but charts/keywords indicate intent, infer defaults
+    if response_type == "object" and not obj_keys:
+        inferred: List[str] = []
+        # Always include a summary slot first
+        inferred.append("summary")
+        tlow = text.lower()
+        if any(k in tlow for k in ["sales", "revenue", "orders"]):
+            inferred.append("total_sales")
+        if any(k in tlow for k in ["latency", "network", "ping"]):
+            inferred.append("avg_latency_ms")
+        if any(k in tlow for k in ["weather", "temperature", "temp "]):
+            inferred.append("avg_temperature")
+        # Include chart slot keys if present
+        for c in charts:
+            sk = c.get("slot_key")
+            if isinstance(sk, str) and sk not in inferred:
+                inferred.append(sk)
+        obj_keys = inferred
     return {
-        "response_type": shape.get("type", "object"),
+        "response_type": response_type,
         "array_len": shape.get("array_len"),
-        "object_keys": shape.get("object_keys") or [],
+        "object_keys": obj_keys,
         "charts": charts,
         "raw_base64_images": raw,
     }

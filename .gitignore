@@ -18,4 +18,6 @@ __pycache__/
 *.webp
 *.txt
 data-analyst-agent/*.csv
-data-analyst-agent/*
+data-analyst-agent/*.json
+data-analyst-agent/*.parquet
+data-analyst-agent/tasks

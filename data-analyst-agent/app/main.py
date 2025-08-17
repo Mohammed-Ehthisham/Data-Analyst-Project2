@@ -5,6 +5,9 @@ from .utils.io_loader import classify_and_read
 from .utils.timer import with_time_budget
 from .utils.formats import parse_questions, parse_plan
 from .tasks.generic import run_generic
+from .tasks.sales import run_sales
+from .tasks.network import run_network
+from .tasks.weather import run_weather
 from .tasks.wikipedia import run_wikipedia
 from .tasks.duckdb_tasks import run_duckdb_example
 
@@ -79,8 +82,9 @@ async def handle_api(
         except Exception:
             raise HTTPException(status_code=400, detail="Failed to read questions.txt")
 
-        # Collect other files (counts only for now)
+        # Collect other files (and load DataFrames for tasks)
         inputs = {"dataframes": [], "images": [], "raw": []}
+        dfs_loaded = []
         seen = set()
         for key, value in form.multi_items():
             if key == "questions.txt":
@@ -94,9 +98,10 @@ async def handle_api(
                 if not fname or fname in seen:
                     continue
                 seen.add(fname)
-                kind, _ = classify_and_read(fname, getattr(value, "content_type", None), content)
+                kind, data = classify_and_read(fname, getattr(value, "content_type", None), content)
                 if kind == "dataframe":
                     inputs["dataframes"].append("df")
+                    dfs_loaded.append(data)
                 elif kind == "image":
                     inputs["images"].append("img")
                 else:
@@ -112,9 +117,10 @@ async def handle_api(
                 if not fname or fname in seen:
                     continue
                 seen.add(fname)
-                kind, _ = classify_and_read(fname, getattr(f, "content_type", None), content)
+                kind, data = classify_and_read(fname, getattr(f, "content_type", None), content)
                 if kind == "dataframe":
                     inputs["dataframes"].append("df")
+                    dfs_loaded.append(data)
                 elif kind == "image":
                     inputs["images"].append("img")
                 else:
@@ -130,7 +136,7 @@ async def handle_api(
         plan = simple_plan
 
         # Minimal task routing retained from Step 6 (no change for PATCH A)
-        dfs = []
+        dfs = dfs_loaded
         result_payload = {"notes": "no-op"}
         try:
             text_low = q_text.lower()
@@ -139,6 +145,21 @@ async def handle_api(
                     result_payload = {"notes": "timeout-skip-wiki"}
                 else:
                     result_payload = run_wikipedia(q_text)
+            elif any(k in text_low for k in ["sales", "revenue", "orders"]):
+                if budget.time_exhausted(2.0):
+                    result_payload = {"notes": "timeout-skip-sales"}
+                else:
+                    result_payload = run_sales(q_text, {"dfs": dfs})
+            elif any(k in text_low for k in ["latency", "network", "ping"]):
+                if budget.time_exhausted(2.0):
+                    result_payload = {"notes": "timeout-skip-network"}
+                else:
+                    result_payload = run_network(q_text, {"dfs": dfs})
+            elif any(k in text_low for k in ["weather", "temperature", "temp "]):
+                if budget.time_exhausted(2.0):
+                    result_payload = {"notes": "timeout-skip-weather"}
+                else:
+                    result_payload = run_weather(q_text, {"dfs": dfs})
             elif "duckdb" in text_low or "s3" in text_low:
                 if budget.time_exhausted(2.0):
                     result_payload = {"notes": "timeout-skip-duckdb"}
@@ -152,30 +173,66 @@ async def handle_api(
         except Exception as e:
             result_payload = {"notes": f"task-error: {e}"}
 
-        # Shape output (unchanged from Step 4/6)
-        if plan.get("type") == "array":
-            count = plan.get("array_count") or 0
-            shaped = {"result": ["" for _ in range(count)], "task": result_payload}
-        elif plan.get("type") == "object":
-            keys = plan.get("object_keys") or []
-            shaped_obj = {k: result_payload.get(k, "N/A") if isinstance(result_payload, dict) else "N/A" for k in keys}
-            if "notes" in keys and isinstance(result_payload, dict) and "notes" in result_payload:
-                shaped_obj["notes"] = result_payload["notes"]
-            shaped = {"result": shaped_obj}
+        # Shape output according to combined plan (PATCH E/F basics)
+        cplan = combined_plan
+        shaped = {}
+        if cplan.get("response_type") == "array":
+            n = cplan.get("array_len") or 0
+            shaped = {"result": ["" for _ in range(n)], "task": result_payload}
         else:
-            shaped = {"result": result_payload}
+            keys = cplan.get("object_keys") or []
+            shaped_obj = {}
+            # Build a mapping from chart type to key requested
+            chart_key_map = {}
+            for c in cplan.get("charts", []) or []:
+                ctype = c.get("type")
+                # prefer explicit slot_key, else infer by type
+                dest = c.get("slot_key") or ("bar_chart" if ctype == "bar" else ("scatter_plot" if ctype == "scatter" else ("line_chart" if ctype == "line" else None)))
+                if dest:
+                    chart_key_map[ctype] = dest
 
-        return JSONResponse(
+            for k in keys:
+                val = None
+                if isinstance(result_payload, dict) and k in result_payload:
+                    val = result_payload[k]
+                # Route generic plot_image or task-specific line_chart/bar_chart to requested key
+                if val is None and isinstance(result_payload, dict):
+                    # if requested bar_chart but result has a generic plot_image
+                    if k == chart_key_map.get("bar") and "plot_image" in result_payload:
+                        val = result_payload["plot_image"]
+                    if k == chart_key_map.get("scatter") and "plot_image" in result_payload:
+                        val = result_payload["plot_image"]
+                    if k == chart_key_map.get("line") and "line_chart" in result_payload:
+                        val = result_payload["line_chart"]
+                    if k == chart_key_map.get("bar") and "bar_chart" in result_payload:
+                        val = result_payload["bar_chart"]
+
+                # enforce numeric for typical numeric fields
+                if k.lower() in ("total_sales", "avg_latency_ms", "avg_temperature") and not isinstance(val, (int, float)):
+                    try:
+                        val = float(val)
+                    except Exception:
+                        val = 0.0
+                # ensure images present as string if provided
+                if k.lower() in ("bar_chart", "scatter_plot", "line_chart") and not isinstance(val, str):
+                    val = ""
+                if val is None:
+                    # default string placeholder
+                    val = "N/A"
+                shaped_obj[k] = val
+            shaped = {"result": shaped_obj}
+
+    return JSONResponse(
             {
                 "status": "ok",
-              "note": "patch-b",
+        "note": "patch-c",
                 "counts": {
                     "dataframes": len(inputs["dataframes"]),
                     "images": len(inputs["images"]),
                     "raw": len(inputs["raw"]),
                 },
-              "plan": plan,
-              "combined_plan": combined_plan,
+        "plan": plan,
+        "combined_plan": combined_plan,
                 **shaped,
                 "timing": {
                     "elapsed_sec": round(budget.elapsed_seconds(), 3),

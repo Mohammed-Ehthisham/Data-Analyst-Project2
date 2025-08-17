@@ -17,17 +17,16 @@ SIZE_RE = re.compile(r"(\d{2,3}[,]?\d{3})\s*bytes|([1-9]\d*)\s*k(?:b|ib)?", re.I
 
 # Chart keywords
 BAR_RE = re.compile(r"\b(bar|bars|bar\s*chart)\b", re.IGNORECASE)
-LINE_RE = re.compile(r"\b(line|line\s*chart)\b", re.IGNORECASE)
+LINE_RE = re.compile(r"\bline\s*(chart|plot)\b", re.IGNORECASE)
 HIST_RE = re.compile(r"\b(hist|histogram)\b", re.IGNORECASE)
 SCATTER_RE = re.compile(r"\bscatter\b", re.IGNORECASE)
 COLOR_RE = re.compile(r"\b(blue|green|red|orange|purple|black)\b", re.IGNORECASE)
 DATA_URI_RE = re.compile(r"data\s*uri|data:image/\w+;base64", re.IGNORECASE)
 RAW_B64_RE = re.compile(r"raw\s*base64|base64\s*(png|only)\b", re.IGNORECASE)
 
-# Keys extraction: quoted tokens that look like keys, or lines starting with - key:
-QUOTED_KEY_RE = re.compile(r"\"([A-Za-z0-9_ \-]+)\"")
-LINE_KEY_RE = re.compile(r"^[\s*-]*([A-Za-z0-9_\-]+)\s*:\s*$", re.MULTILINE)
-KEYS_LIST_RE = re.compile(r"keys?\s*:\s*\"([^\"]+)\"(?:\s*,\s*\"([^\"]+)\")*", re.IGNORECASE)
+# Keys extraction: explicit bullets or quoted list after 'keys:' only
+BULLET_KEY_RE = re.compile(r"^\s*-\s*([A-Za-z0-9_\-]+)\s*:\s*$", re.MULTILINE)
+KEYS_LIST_LINE_RE = re.compile(r"keys?\s*:\s*(.+)$", re.IGNORECASE | re.MULTILINE)
 
 
 def _extract_array_count(text: str) -> Optional[int]:
@@ -42,24 +41,19 @@ def _extract_array_count(text: str) -> Optional[int]:
 
 def _extract_object_keys(text: str) -> List[str]:
     keys: List[str] = []
-    # 1) Quoted keys appearing near words like keys or object
-    for m in QUOTED_KEY_RE.finditer(text):
-        candidate = m.group(1).strip()
-        if candidate and len(candidate) <= 64:
-            keys.append(candidate)
-    # 2) Lines like '- field:' or 'field:'
-    for m in LINE_KEY_RE.finditer(text):
+    # 1) Bulleted keys like '- field:' only (ignore plain headings like 'Charts:')
+    for m in BULLET_KEY_RE.finditer(text):
         candidate = m.group(1).strip()
         if candidate and candidate not in keys:
             keys.append(candidate)
-    # Deduplicate preserving order
-    dedup: List[str] = []
-    seen = set()
-    for k in keys:
-        if k not in seen:
-            dedup.append(k)
-            seen.add(k)
-    return dedup
+    # 2) Explicit quoted list on a 'keys:' line
+    for m in KEYS_LIST_LINE_RE.finditer(text):
+        line = m.group(1)
+        for q in re.findall(r'"([^"]+)"', line):
+            qv = q.strip()
+            if qv and qv not in keys:
+                keys.append(qv)
+    return keys
 
 
 def _extract_global_max_bytes(text: str) -> int:

@@ -64,6 +64,6 @@ __pycache__/
 *.bmp
 *.tiff
 *.webp
-*.txt
+questions.txt
 
 start.py

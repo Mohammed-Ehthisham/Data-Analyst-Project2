@@ -4,8 +4,8 @@ from typing import Any, Dict, List
 
 import pandas as pd
 
-from ..utils.formats import parse_plan
-from ..utils.plotter import plot_line, encode_fig
+from utils.formats import parse_plan
+from utils.plotter import plot_line, encode_fig
 
 
 def run_weather(question_text: str, inputs: Dict[str, Any]) -> Dict[str, Any]:

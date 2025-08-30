@@ -4,9 +4,9 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
-from ..utils.plotter import plot_scatter_with_regression, encode_image_under_limit, encode_fig, plot_bar, plot_line
-from ..utils.formats import parse_plan
-from ..utils.llm_client import ask_openai_json
+from utils.plotter import plot_scatter_with_regression, encode_image_under_limit, encode_fig, plot_bar, plot_line
+from utils.formats import parse_plan
+from utils.llm_client import ask_openai_json
 
 
 def summarize_dataframes(dfs: List[pd.DataFrame]) -> Dict[str, Any]:

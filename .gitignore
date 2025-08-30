@@ -1,69 +1,94 @@
-# Python caches
+# Python caches and bytecode
 __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
+*.so
 *.egg-info/
 .Python
-.pytest_cache/
-.mypy_cache/
-.cache/
-pip-wheel-metadata/
 
-# Build/dist
-dist/
-build/
-
-# Virtual envs
+# Virtual environments
 .venv/
 venv/
 env/
 ENV/
 
-# IDE/editor
+# IDE/Editor files
 .idea/
 .vscode/
 *.code-workspace
+.spyderproject
+.spyproject
 
 # OS files
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
 
-# Secrets/config
+# Environment variables and secrets
 .env
-*.env
-.env.*.local
+.env.*
+!.env.example
 
-# Jupyter
+# Testing and coverage
+.pytest_cache/
+.coverage
+.tox/
+.cache/
+htmlcov/
+
+# Jupyter Notebooks
 .ipynb_checkpoints/
 
-# Logs/temp
+# Logs and temporary files
 *.log
 *.tmp
+*.temp
+logs/
+temp/
 
-# Binaries not needed in deploy
-*.bin
-
-# App bytecode caches
-
-.venv/
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
+# Development databases (keep production configs)
 *.db
+*.sqlite
 *.sqlite3
-*.log
-*.csv
-*.json
-*.parquet
-*.jpg
-*.jpeg
-*.png
-*.gif
-*.bmp
-*.tiff
-*.webp
-questions.txt
 
+# Development data files (uncomment if you want to exclude test data)
+# *.csv
+# *.json
+# *.parquet
+# *.xlsx
+
+# Large media files (if not needed for functionality)
+# *.jpg
+# *.jpeg
+# *.png
+# *.gif
+# *.bmp
+# *.tiff
+# *.webp
+
+# Build artifacts
+build/
+dist/
+pip-wheel-metadata/
+
+# MyPy type checking
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Node.js (if any frontend components)
+node_modules/
+npm-debug.log*
+
+# Backup files
+*.bak
+*.backup
+*~
+
+# Local development files
 start.py

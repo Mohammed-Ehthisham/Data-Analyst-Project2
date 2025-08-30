@@ -5,6 +5,13 @@ services:
     runtime: python-3.12.10
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --timeout-keep-alive 300
     healthCheckPath: /
+    envVars:
+      - key: OPENAI_MODEL
+        value: gpt-4o
+      - key: OPENAI_FALLBACK_MODEL  
+        value: gpt-4
+      - key: REQUEST_TIMEOUT
+        value: "240"
 

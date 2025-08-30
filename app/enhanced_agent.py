@@ -15,11 +15,11 @@ try:
 except ImportError:
     openai = None
 
-from config import get_settings
-from utils.formats import parse_questions, parse_plan
-from utils.llm_client import ask_openai_json
-from tasks import sales, network, weather, wikipedia, highcourt, duckdb_tasks, generic
-from chart_generator import ChartGenerator
+from .config import get_settings
+from .utils.formats import parse_questions, parse_plan
+from .utils.llm_client import ask_openai_json
+from .tasks import sales, network, weather, wikipedia, highcourt, duckdb_tasks, generic
+from .chart_generator import ChartGenerator
 
 logger = logging.getLogger(__name__)
 

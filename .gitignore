@@ -92,3 +92,4 @@ npm-debug.log*
 
 # Local development files
 start.py
+test_deployment.py

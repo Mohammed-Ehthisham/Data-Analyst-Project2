@@ -1,10 +1,10 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from enhanced_agent import EnhancedLLMAgent
-from utils.io_loader import classify_and_read
-from utils.timer import with_time_budget
-from utils.formats import parse_questions, parse_plan
+from .enhanced_agent import EnhancedLLMAgent
+from .utils.io_loader import classify_and_read
+from .utils.timer import with_time_budget
+from .utils.formats import parse_questions, parse_plan
 
 # Initialize enhanced LLM agent
 enhanced_agent = EnhancedLLMAgent()

@@ -13,10 +13,12 @@ class Settings(BaseSettings):
     # OpenAI API configuration
     openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
     openai_model: str = Field(default="gpt-4o", alias="OPENAI_MODEL")  # Enhanced model
+    openai_fallback_model: str = Field(default="gpt-4", alias="OPENAI_FALLBACK_MODEL")  # Fallback model
     
     # Application settings
     debug: bool = Field(default=False, alias="DEBUG")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
+    request_timeout: int = Field(default=240, alias="REQUEST_TIMEOUT")  # Request timeout
     
     # API configuration
     max_request_size: int = Field(default=10 * 1024 * 1024, alias="MAX_REQUEST_SIZE")  # 10MB
